@@ -106,7 +106,7 @@ are computed in UTC and converted to the gym timezone for display. The schedulin
 - **Celery + Redis for async** so notification dispatch and future email/SMS work stay off the
   request path.
 - **UUID primary keys** for application entities (spec §8): non-enumerable, merge-friendly.
-- **GitLab CI** (`gitlab.devhub.ninja`) per spec §17.
+- **GitLab CI** (`gitlab.devhub.ninja/theo/project-6-nextup`) per spec §17.
 
 ## Deployment
 

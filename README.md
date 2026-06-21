@@ -34,7 +34,7 @@ All orchestrated with Docker Compose. See `docs/ARCHITECTURE.md`.
 ## Quickstart
 
 ```bash
-git clone <gitlab.devhub.ninja/.../project-6-nextup>
+git clone https://gitlab.devhub.ninja/theo/project-6-nextup.git
 cd project-6-nextup
 make setup     # copies .env.example -> .env, generates *.local TLS certs (needs mkcert)
 # add the hostnames printed by setup to /etc/hosts (all -> 127.0.0.1)
