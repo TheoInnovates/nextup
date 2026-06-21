@@ -1,0 +1,13 @@
+# Grafana dashboard provider (Phase 8). Loads JSON dashboards from this folder.
+apiVersion: 1
+
+providers:
+  - name: NextUp
+    orgId: 1
+    folder: NextUp
+    type: file
+    disableDeletion: false
+    editable: true
+    options:
+      path: /etc/grafana/provisioning/dashboards
+      foldersFromFilesStructure: false

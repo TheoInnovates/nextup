@@ -1,0 +1,255 @@
+# NextUp — starter docker-compose (Phase 0).
+#
+# All MVP services (spec §16) are DECLARED so `docker compose config` validates.
+# Phase 0 does not require any service to actually start — bringing the stack up
+# (and the Keycloak realm import, Prometheus scraping, etc.) is Phase 1+/2/8 work.
+# Routing is label-driven via caddy-docker-proxy + mkcert *.local TLS, matching
+# the project-4-workspace infra convention.
+
+name: nextup
+
+networks:
+  nextup:
+    name: nextup
+
+volumes:
+  postgres_data:
+  redis_data:
+  keycloak_data:
+  prometheus_data:
+  grafana_data:
+
+services:
+  # --- Reverse proxy (label-driven) ------------------------------------------
+  caddy:
+    image: lucaslorentz/caddy-docker-proxy:2.10-alpine
+    container_name: nextup-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      CADDY_INGRESS_NETWORKS: nextup
+    networks: [nextup]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./infrastructure/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./infrastructure/caddy/certs:/certs:ro
+    healthcheck:
+      test: ["CMD", "caddy", "version"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
+  # --- Frontend (Next.js) — built in Phase 1 ---------------------------------
+  web:
+    build:
+      context: ./apps/web
+    container_name: nextup-web
+    restart: unless-stopped
+    env_file: [.env]
+    networks: [nextup]
+    depends_on:
+      api:
+        condition: service_started
+    labels:
+      caddy: ${WEB_HOST:-nextup.local}
+      caddy.reverse_proxy: "{{upstreams 3000}}"
+      caddy.import: tls_certs
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  # --- Backend (FastAPI) — built in Phase 1 ----------------------------------
+  api:
+    build:
+      context: ./apps/api
+    container_name: nextup-api
+    restart: unless-stopped
+    env_file: [.env]
+    networks: [nextup]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    labels:
+      caddy: ${API_HOST:-api.nextup.local}
+      caddy.reverse_proxy: "{{upstreams 8000}}"
+      caddy.import: tls_certs
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health').status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  # --- Async worker (Celery) — built in Phase 1 ------------------------------
+  celery-worker:
+    build:
+      context: ./apps/api
+    container_name: nextup-celery-worker
+    restart: unless-stopped
+    command: ["celery", "-A", "app.workers.celery_app", "worker", "--loglevel=INFO"]
+    env_file: [.env]
+    networks: [nextup]
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 384M
+
+  # --- PostgreSQL ------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: nextup-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-nextup}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nextup}
+      POSTGRES_DB: ${POSTGRES_DB:-nextup}
+    networks: [nextup]
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nextup} -d ${POSTGRES_DB:-nextup}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  # --- Redis -----------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: nextup-redis
+    restart: unless-stopped
+    networks: [nextup]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
+  # --- Keycloak (realm import added in Phase 2) ------------------------------
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    container_name: nextup-keycloak
+    restart: unless-stopped
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      KC_HOSTNAME: ${KC_HOSTNAME:-auth.nextup.local}
+      KC_PROXY_HEADERS: xforwarded
+      KC_HTTP_ENABLED: "true"
+      KC_HEALTH_ENABLED: "true"
+    networks: [nextup]
+    volumes:
+      - keycloak_data:/opt/keycloak/data
+      - ./infrastructure/keycloak:/opt/keycloak/data/import:ro
+    labels:
+      caddy: ${AUTH_HOST:-auth.nextup.local}
+      caddy.reverse_proxy: "{{upstreams 8080}}"
+      caddy.import: tls_certs
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && echo -e 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && cat <&3 | grep -q 'UP'"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+
+  # --- Mailpit (local email) -------------------------------------------------
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: nextup-mailpit
+    restart: unless-stopped
+    networks: [nextup]
+    labels:
+      caddy: ${MAIL_HOST:-mail.nextup.local}
+      caddy.reverse_proxy: "{{upstreams 8025}}"
+      caddy.import: tls_certs
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
+  # --- Prometheus (real scrape config in Phase 8) ----------------------------
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    container_name: nextup-prometheus
+    restart: unless-stopped
+    networks: [nextup]
+    volumes:
+      - ./infrastructure/prometheus:/etc/prometheus:ro
+      - prometheus_data:/prometheus
+    labels:
+      caddy: ${PROMETHEUS_HOST:-prometheus.nextup.local}
+      caddy.reverse_proxy: "{{upstreams 9090}}"
+      caddy.import: tls_certs
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9090/-/healthy"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  # --- Grafana (dashboards provisioned in Phase 8) ---------------------------
+  grafana:
+    image: grafana/grafana:11.4.0
+    container_name: nextup-grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_SERVER_ROOT_URL: https://${GRAFANA_HOST:-grafana.nextup.local}
+    networks: [nextup]
+    volumes:
+      - ./infrastructure/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+    labels:
+      caddy: ${GRAFANA_HOST:-grafana.nextup.local}
+      caddy.reverse_proxy: "{{upstreams 3000}}"
+      caddy.import: tls_certs
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 256M

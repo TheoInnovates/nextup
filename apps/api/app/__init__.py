@@ -1,0 +1,1 @@
+"""NextUp backend application package."""

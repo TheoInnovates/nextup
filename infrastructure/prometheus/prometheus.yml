@@ -1,0 +1,20 @@
+# Prometheus scrape configuration for NextUp (Phase 8).
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  - job_name: nextup-api
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["api:8000"]
+
+  # Caddy exposes metrics on its admin endpoint; enable by binding the admin
+  # API to 0.0.0.0:2019 in the Caddyfile global block if desired.
+  # - job_name: caddy
+  #   static_configs:
+  #     - targets: ["caddy:2019"]
