@@ -10,10 +10,12 @@ running services.** Exit criteria: docs are internally consistent, service respo
 defined, and the local-environment structure exists. Phases 1–9 are scoped in the plan docs but
 not implemented now.
 
-The repo is its own git repository pushed to
-`https://gitlab.devhub.ninja/theo/project-6-nextup`, developed locally at
+The repo is its own git repository, publicly hosted at
+`https://github.com/TheoInnovates/nextup`, developed locally at
 `/home/tforrester/projects/project-6-nextup/` (matching the user's `project-N-name` convention;
-the repo's internal root follows the spec's `nextup/` layout).
+the repo's internal root follows the spec's `nextup/` layout). GitLab
+(`gitlab.devhub.ninja/theo/project-6-nextup`) is kept as the CI/CD origin and mirrors to GitHub
+automatically.
 
 ### Locked decisions (from user)
 - **Location:** `/home/tforrester/projects/project-6-nextup/` (own git repo).
