@@ -182,7 +182,7 @@ package:
   stage: package
   rules: [{ if: '$CI_RUN_PACKAGE_JOBS == "true"' }]
   script:
-    - echo "TODO Phase 9: push tagged images to registry"
+    - 'echo "TODO Phase 9: push tagged images to registry"'
 
 # --- deploy (manual placeholder) ---------------------------------------------
 deploy:
